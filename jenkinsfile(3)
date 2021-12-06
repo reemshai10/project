@@ -1,0 +1,71 @@
+pipeline{
+   
+    agent any
+    options{
+        timestamps()
+        timeout(time:7,unit:'MINUTES')
+        buildDiscarder(logRotator(
+            numToKeepStr: '4',
+            daysToKeepStr: '7',
+            artifactNumToKeepStr: '30'))
+        
+    }
+    stages{
+        stage('build') {
+            steps{
+               sh '''#!/bin/bash 
+                    chmod +x ./init.sh
+                    chmod +x ./entry-point.sh
+                    sudo ./init.sh
+                    sleep 10
+                '''   
+            }   
+        }
+        stage('test') {
+            steps{
+                sh '''#!/bin/bash     
+                '''    
+            }   
+        }
+        stage('Publish') {
+            steps{
+                sh '''#!/bin/bash 
+                    sudo apt-get install unzip
+                    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                    unzip awscliv2.zip
+                    sudo ./aws/install
+                    
+                    tag=$(head -n 1 tag.txt)
+		     git tag -a $tag -m $tag
+		     git push origin $tag
+		     
+                    aws configure set aws_access_key_id 
+                    aws configure set aws_secret_access_key                
+                    aws ecr-public get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin public.ecr.aws/c7o8u9c1
+                    sudo docker tag cowsay:latest public.ecr.aws/c7o8u9c1/cowsay-img-deploy:$tag
+                    sudo docker push public.ecr.aws/c7o8u9c1/cowsay-img-deploy:$tag
+                '''    
+            }   
+        } 
+        stage('Deploy') {
+            steps {
+                sh '''#!/bin/bash 
+                    tag=$(head -n 1 tag.txt)
+                    
+                    sudo chmod 400 RSKEY.pem
+                    sudo ssh -i "RSKEY.pem" ubuntu@ec2-35-181-32-127.eu-west-3.compute.amazonaws.com "sudo docker ps -aq | xargs sudo docker rm -f"
+                    sudo ssh -i "RSKEY.pem" ubuntu@ec2-35-181-32-127.eu-west-3.compute.amazonaws.com "sudo docker run --rm -d -p 80:3001 public.ecr.aws/c7o8u9c1/cowsay-img-deploy:$tag"
+                '''
+            }   
+        } 
+    }
+
+    post {
+        failure {
+                mail bcc: '', body: 'Failure to deploy', cc: '', from: '', replyTo: '', subject: 'jenkins job', to: 'reouven29@gmail.com'
+            }
+        success {
+            mail bcc: '', body: 'Success to deploy', cc: '', from: '', replyTo: '', subject: 'jenkins job', to: 'reouven29@gmail.com'
+        }   
+    }
+}
